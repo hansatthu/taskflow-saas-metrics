@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![pandas](https://img.shields.io/badge/pandas-2.x-150458?logo=pandas&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-1.24%2B-013243?logo=numpy&logoColor=white)
-![Status](https://img.shields.io/badge/status-in%20progress-yellow)
+![Status](https://img.shields.io/badge/status-complete-2E6B4E)
 ![License](https://img.shields.io/badge/license-portfolio--project-lightgrey)
 
 Personal ITBA portfolio project. TaskFlow is a **fictional** project-management
@@ -15,11 +15,16 @@ SaaS financial metrics from a raw event ledger — no metric is handed to you
 pre-computed — and turn them into business recommendations, the same
 workflow a Business Analyst runs on real billing data.
 
+**Headline result:** MRR grew from $1,327 to $93,204 over 24 months, but NRR
+averages 98.7% — growth is acquisition-driven, not retention-driven. Full
+reasoning in [`output/business_insights.md`](output/business_insights.md).
+
 ---
 
 ## Table of contents
 
 - [Business questions](#business-questions)
+- [Key findings](#key-findings)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
 - [Data model](#data-model)
@@ -39,6 +44,19 @@ This project must produce a defensible answer to each of these:
 1. **Health** — Is TaskFlow growing in a healthy way, or leaking revenue?
 2. **Channel quality** — Which acquisition channel brings the best-quality customers (highest LTV:CAC)?
 3. **Strategy** — Should the company prioritize acquisition (new customers) or retention (reducing churn) next quarter?
+
+---
+
+## Key findings
+
+Full write-up with Finding → So what → Recommendation for each business
+question: [`output/business_insights.md`](output/business_insights.md).
+
+| Question | Answer |
+|---|---|
+| Is growth healthy? | Mostly no. MRR grew 70x ($1,327 → $93,204) but NRR averages **98.7%** — the existing customer base nets **−$9,186** over 24 months once churn and contraction are netted against expansion. Growth is 100% acquisition-fed. |
+| Best acquisition channel? | **Referral**, at **28.7:1** LTV:CAC — 15x more efficient than **Paid Ads** (2.0:1), which is also the 2nd-largest spend channel. |
+| Acquisition or retention next quarter? | **Retention.** Revenue churn (3.3%/mo) sits well below logo churn (8.3%/mo) — the leak is concentrated in low-value accounts, which is the cheapest segment to fix before spending more on acquisition. |
 
 ---
 
@@ -74,25 +92,28 @@ flowchart LR
 
     subgraph Pipeline["⚙️ Processing (scripts/)"]
         B0[00_generate_data.py]
-        B1[01_build_monthly_snapshot.py]
-        B2[02_calculate_metrics.py]
+        BQ[01_data_quality_checks.py]
+        B1[02_build_monthly_snapshot.py]
+        B2[03_calculate_metrics.py]
     end
 
     subgraph Outputs["📊 Metrics (output/)"]
+        C0[data_quality_notes.md]
         C1[monthly_snapshot.csv]
         C2[mrr_by_month.csv]
         C3[mrr_waterfall.csv]
         C4[churn_rate_by_month.csv]
         C5[nrr_by_month.csv]
-        C6[cac_by_channel.csv]
+        C6[cac_by_channel.csv / ltv_by_plan.csv]
         C7[ltv_cac_by_channel.csv]
         C8[cohort_retention.csv]
     end
 
-    D[📈 Dashboard\nGrowth · Retention · Unit Economics]
+    D[📈 Dashboard — Streamlit + Plotly\nGrowth · Retention · Unit Economics]
     E[📝 business_insights.md\nFinding → So what → Recommendation]
 
     B0 -.generates.-> A1 & A2 & A3 & A4
+    A1 & A2 --> BQ --> C0
     A1 & A2 --> B1 --> C1
     C1 --> B2
     A3 & A4 --> B2
@@ -162,12 +183,13 @@ taskflow-saas-metrics/
 │   ├── plans.csv                     plan pricing reference          (4 rows)
 │   └── data_dictionary.md            full schema + known limitations
 ├── scripts/
-│   ├── 00_generate_data.py           dataset generator (seeded, reproducible)   ✅ done
-│   ├── 01_build_monthly_snapshot.py  forward-fills plan/MRR per customer/month  ⬜ todo
-│   └── 02_calculate_metrics.py       computes all metric CSVs below             ⬜ todo
-├── output/                           analysis results land here (CSVs, notes)
-│   ├── data_quality_notes.md
-│   ├── monthly_snapshot.csv
+│   ├── 00_generate_data.py           dataset generator (seeded, reproducible)
+│   ├── 01_data_quality_checks.py     sanity-checks the ledger, writes data_quality_notes.md
+│   ├── 02_build_monthly_snapshot.py  forward-fills plan/MRR per customer/month
+│   └── 03_calculate_metrics.py       computes all 8 metric CSVs below
+├── output/                           analysis results (CSVs, notes) — all generated
+│   ├── data_quality_notes.md         6/6 checks passed
+│   ├── monthly_snapshot.csv          32,681 customer-month rows
 │   ├── mrr_by_month.csv
 │   ├── mrr_waterfall.csv
 │   ├── churn_rate_by_month.csv
@@ -176,8 +198,9 @@ taskflow-saas-metrics/
 │   ├── ltv_by_plan.csv
 │   ├── ltv_cac_by_channel.csv
 │   ├── cohort_retention.csv
-│   └── business_insights.md
-└── dashboard/                        final dashboard file(s) / screenshots
+│   └── business_insights.md          Finding → So what → Recommendation
+└── dashboard/
+    └── app.py                        Streamlit app — 3 views, run with `streamlit run dashboard/app.py`
 ```
 
 ---
@@ -197,24 +220,28 @@ flowchart TD
 ```
 
 ### Step 1 — Data understanding & cleaning
-- Read `data/data_dictionary.md` fully before writing any code.
-- Sanity-check the event ledger: no duplicate signups per customer, no
-  negative MRR values, all event_dates within Jan 2023–Dec 2024.
-- Write findings to `output/data_quality_notes.md`.
+- Script: `scripts/01_data_quality_checks.py`
+- Sanity-checks the event ledger: no duplicate signups per customer, no
+  negative MRR values, all event_dates within Jan 2023–Dec 2024, at most
+  one event per customer per month, no same-month signup+cancel, full
+  referential integrity against `customers.csv`.
+- Output: `output/data_quality_notes.md` — **6/6 checks passed**, ledger
+  needs no cleaning before Step 2.
 
 ### Step 2 — Build the monthly customer snapshot
-- Script: `scripts/01_build_monthly_snapshot.py`
-- For every customer, forward-fill their plan/MRR state across every
-  month from signup to Dec 2024 (or their cancel date) using the event
-  ledger in `subscription_events.csv`.
-- Output: `output/monthly_snapshot.csv` — one row per customer per
-  active month, columns: `customer_id, month, plan, mrr, acquisition_channel`.
-- Sanity check: total active paying customers in the last month should
-  be close to **~2,162** (printed by the original generator run).
+- Script: `scripts/02_build_monthly_snapshot.py`
+- For every customer, forward-fills their plan/MRR state across every
+  month from signup to Dec 2024 (or the month before they cancel), using
+  the event ledger in `subscription_events.csv` and a `merge_asof`
+  "last event on/before month M" join.
+- Output: `output/monthly_snapshot.csv` — 32,681 rows, columns:
+  `customer_id, month, plan, mrr, acquisition_channel`.
+- Sanity check: **2,162** paying customers active in Dec 2024 — matches the
+  README's target exactly.
 
 ### Step 3 — Core metrics
-- Script: `scripts/02_calculate_metrics.py`
-- Compute, save each to its own CSV in `output/`:
+- Script: `scripts/03_calculate_metrics.py`
+- Computes, saves each to its own CSV in `output/` (gross margin assumption: **80%**):
 
 | File | Contents |
 |---|---|
@@ -228,18 +255,24 @@ flowchart TD
 | `cohort_retention.csv` | % of each signup-month cohort still active N months later |
 
 ### Step 4 — Dashboard
-- Build in Power BI / Tableau Public / or a Python (Plotly/Streamlit) app.
-- Save final file/screenshots into `dashboard/`.
-- Three views: **Growth Overview**, **Retention Health**, **Unit Economics**
-  (see full spec in the conversation this project came from).
+- App: `dashboard/app.py` (Streamlit + Plotly) — run with
+  `streamlit run dashboard/app.py`.
+- Three views, each reading directly from `output/*.csv`:
+  - **Growth Overview** — MRR trend, MRR waterfall, headline KPIs
+  - **Retention Health** — logo vs. revenue churn, NRR trend, cohort retention heatmap
+  - **Unit Economics** — LTV:CAC by channel (vs. 3:1 benchmark), LTV/CAC by channel
+- Colors are assigned by a fixed rule: each acquisition channel keeps one
+  color across every chart on the page; the LTV:CAC chart uses status
+  color (green/red) against the 3:1 benchmark line, not the channel colors.
 
 ### Step 5 — Insights & recommendations
-- Write `output/business_insights.md`: Finding → So what → Recommendation,
-  answering the [3 business questions](#business-questions) at the top of this file.
+- `output/business_insights.md`: Finding → So what → Recommendation,
+  answering the [3 business questions](#business-questions) — see [Key findings](#key-findings) above for the short version.
 
 ### Step 6 — Limitations
-- Add to `output/business_insights.md`: no involuntary churn modeled,
-  gross margin is an assumption, no macro/competitive effects.
+- Documented in `output/business_insights.md`: no involuntary churn modeled,
+  gross margin (80%) is an assumption, no macro/competitive effects, CAC is
+  blended per channel (not per-campaign).
 
 ---
 
@@ -263,16 +296,19 @@ LTV:CAC ratio       = LTV / CAC   (healthy benchmark: > 3:1)
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. (Already done) Regenerate the synthetic dataset if needed — seeded & reproducible
+# 2. (Optional) Regenerate the synthetic dataset — seeded & reproducible
 python scripts/00_generate_data.py
 
-# 3. Build the monthly customer snapshot
-python scripts/01_build_monthly_snapshot.py
+# 3. Data quality checks -> output/data_quality_notes.md
+python scripts/01_data_quality_checks.py
 
-# 4. Compute all core metrics
-python scripts/02_calculate_metrics.py
+# 4. Build the monthly customer snapshot -> output/monthly_snapshot.csv
+python scripts/02_build_monthly_snapshot.py
 
-# 5. Launch the dashboard (if using the Streamlit track)
+# 5. Compute all 8 core metrics -> output/*.csv
+python scripts/03_calculate_metrics.py
+
+# 6. Launch the dashboard
 streamlit run dashboard/app.py
 ```
 
@@ -281,12 +317,12 @@ streamlit run dashboard/app.py
 ## Status
 
 - [x] Dataset generated (`data/`)
-- [ ] Step 1 — data quality notes
-- [ ] Step 2 — monthly snapshot
-- [ ] Step 3 — core metrics
-- [ ] Step 4 — dashboard
-- [ ] Step 5 — insights
-- [ ] Step 6 — limitations
+- [x] Step 1 — data quality notes (6/6 checks passed)
+- [x] Step 2 — monthly snapshot (32,681 rows; sanity check matched exactly)
+- [x] Step 3 — core metrics (all 8 files generated, waterfall reconciles to $0 diff)
+- [x] Step 4 — dashboard (Streamlit + Plotly, 3 views)
+- [x] Step 5 — insights (`output/business_insights.md`)
+- [x] Step 6 — limitations (documented in `output/business_insights.md`)
 
 ---
 
